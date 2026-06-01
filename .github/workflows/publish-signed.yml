@@ -1,0 +1,38 @@
+# Publish a signed adapter — created by github-actions[bot], gated on the PUBLIC key.
+# You sign locally (seed never leaves your machine) and commit the signed .mybiadapter to
+# dist/. This workflow verifies it against the MyBI public key (no secrets) and, only if
+# valid, publishes the GitHub release AS github-actions[bot]. Invalid -> the job fails and
+# no release is created. The MyBI app re-verifies on download + every read (defense in depth).
+name: Publish signed adapter
+on:
+  push:
+    branches: [main]
+    paths: ["dist/*.mybiadapter"]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Verify signature + resolve version (PUBLIC key — no secrets)
+        id: v
+        run: |
+          f="$(ls dist/*.mybiadapter | head -1)"
+          node scripts/verify-adapter.mjs "$f"
+          ver="$(unzip -p "$f" manifest.json | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>process.stdout.write(JSON.parse(s).version))")"
+          echo "file=$f" >> "$GITHUB_OUTPUT"
+          echo "tag=v$ver" >> "$GITHUB_OUTPUT"
+      - name: Publish release as github-actions[bot]
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="${{ steps.v.outputs.tag }}"
+          gh release delete "$tag" -R "${{ github.repository }}" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$tag" "${{ steps.v.outputs.file }}" -R "${{ github.repository }}" --latest \
+            --title "Recharts adapter $tag" \
+            --notes "MyBI-signed Recharts chart adapter, published by CI after Ed25519 public-key verification."
