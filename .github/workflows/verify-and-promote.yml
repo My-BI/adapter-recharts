@@ -1,0 +1,70 @@
+# Verify a signed adapter, then promote it — as github-actions[bot], with NO secrets.
+#
+# Flow (the "withhold then promote" gate):
+#   1. You sign the adapter locally (Developer Studio — the seed never leaves your machine).
+#   2. The signed `.mybiadapter` is published as a PRE-RELEASE (GitHub's /releases/latest
+#      excludes pre-releases, so the MyBI app will NOT install it yet — effectively withheld).
+#   3. This workflow verifies the asset against the MyBI PUBLIC key (no secret needed):
+#        ✓  -> promotes the release to `latest` (the app can now download it), as the bot.
+#        ✗  -> fails the check; the release stays a pre-release = withheld.
+#   4. Defense in depth: the MyBI app ALSO re-verifies the signature on download + on every
+#      read, so this CI gate is a belt to the app's suspenders — never the only check.
+name: Verify & promote signed adapter
+
+on:
+  release:
+    types: [prereleased]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag holding the signed .mybiadapter (pre-release)"
+        required: true
+
+permissions:
+  contents: write   # edit the release (promote to latest) as github-actions[bot]
+
+jobs:
+  verify-and-promote:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Resolve release tag
+        id: rel
+        run: echo "tag=${{ github.event.release.tag_name || inputs.tag }}" >> "$GITHUB_OUTPUT"
+
+      - name: Download the signed adapter asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p incoming
+          gh release download "${{ steps.rel.outputs.tag }}" -R "${{ github.repository }}" \
+            -p "*.mybiadapter" -D incoming
+          ls -l incoming
+
+      - name: Verify signature (PUBLIC key — no secrets)
+        id: verify
+        run: |
+          f="$(ls incoming/*.mybiadapter | head -1)"
+          node scripts/verify-adapter.mjs "$f"
+
+      # Only runs when verify succeeded → promote the pre-release to the official latest.
+      - name: Promote to latest (github-actions[bot])
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release edit "${{ steps.rel.outputs.tag }}" -R "${{ github.repository }}" \
+            --prerelease=false --latest
+          echo "Promoted ${{ steps.rel.outputs.tag }} to latest — verified MyBI signature."
+
+      # If verify failed the job already failed here; the release stays a pre-release
+      # (withheld). Surface it clearly.
+      - name: Withheld (verification failed)
+        if: failure()
+        run: |
+          echo "::error::Signature did not verify — release left as a pre-release (withheld)."
+          exit 1
