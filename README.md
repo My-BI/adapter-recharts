@@ -1,17 +1,21 @@
 # adapter-recharts
 
-The **Recharts** rendering engine, packaged for **MyBI**.
+The MyBI **Recharts chart adapter** — the per-library draw that renders a MyBI `ChartSpec`
+with [Recharts](https://recharts.org), built against the MyBI chart host SDK.
 
-Recharts is a React chart library, so its UMD (`Recharts.js`) is built **React-external** — it
-reads `window.React`, `window.ReactDOM` and `window.ReactIs` so it shares MyBI's single React
-instance (no dual-React). MyBI's in-app adapter renders charts through it; this repo hosts the
-unmodified UMD so MyBI can **download it on demand** instead of bundling it. MyBI's registry
-(`My-BI/plugin-registry → charts/registry.json`) links the `recharts` engine here; the app
-verifies the download against the published SHA-256.
+It is distributed as a signed `.mybiadapter` (a zip of `manifest.json` + `bundle.js` +
+`signature.json`), downloaded on demand by MyBI and verified (Ed25519) before it runs. The
+draw reads React, Recharts and the host from globals the app injects — it bundles none of them.
 
-- **Library:** [Recharts](https://recharts.org) v3.8.1 — **unmodified upstream**.
-- **Licence:** MIT (see `LICENSE`).
-- **Asset:** `Recharts.js` (React-external UMD) — SHA-256 `3c3b29e02a7f46a1d847a05294d7e3f1d9ef2c9244d342147417dfff8504a4a0`. Host must expose
-  `window.React` / `window.ReactDOM` / `window.ReactIs` before loading.
+## Releases
 
-Fixes for how MyBI *uses* Recharts live in the in-app adapter, never in this bundle.
+The `recharts.mybiadapter` asset on each release is the signed adapter. Releases are published
+by CI (`github-actions[bot]`) only after the signature verifies against the MyBI public key.
+
+## Verify
+
+```sh
+node scripts/verify-adapter.mjs recharts.mybiadapter
+```
+
+MIT.
